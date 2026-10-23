@@ -1,11 +1,13 @@
 {
     "exportFormatVersion": 2,
-    "exportTime": "2026-10-22 20:01:59",
+    "exportTime": "2026-10-23 03:17:03",
     "containerVersion": {
-        "path": "accounts/6383589568/containers/267708902/versions/0",
+        "path": "accounts/6383589568/containers/267708902/versions/3",
         "accountId": "6383589568",
         "containerId": "267708902",
-        "containerVersionId": "0",
+        "containerVersionId": "3",
+        "name": "Ecommerce tracking validation and tax improvements",
+        "description": "Improved add_to_cart validation and tax calculations using integer cents. Verified event transformation in GTM Preview and event reception in GA4 DebugView.",
         "container": {
             "path": "accounts/6383589568/containers/267708902",
             "accountId": "6383589568",
@@ -48,7 +50,7 @@
                     {
                         "type": "TEMPLATE",
                         "key": "html",
-                        "value": "<script>\n  (function () {\n    var eventParams = JSON.parse(\n      {{CJS - Event Params JSON}}\n    );\n\n    console.log(\"Original event parameters:\", eventParams);\n\n    var updatedItems = eventParams.items.map(function(item) {\n      var tax = Math.round(item.price * 0.21 * 100) / 100;\n\n      return Object.assign({}, item, {\n        tax: tax\n      });\n    });\n\n    console.log(\"Updated items:\", updatedItems);\n    var totalValue = updatedItems.reduce(function(total, item) {\n      return total + (item.price + item.tax) * item.quantity;\n    }, 0);\n\n    totalValue = Math.round(totalValue * 100) / 100;\n\n    console.log(\"Total value with tax:\", totalValue);\n    \n    window.dataLayer = window.dataLayer || [];\n\n    window.dataLayer.push({ ecommerce: null });\n    \n    window.dataLayer.push({\n      event: \"add_to_cart\",\n      ecommerce: {\n        value: totalValue,\n        currency: eventParams.currency,\n        items: updatedItems\n      }\n    });\n\n  console.log(\"Transformed add_to_cart event pushed!\");\n })();\n</script>"
+                        "value": "<script>\n  (function () {\n    function toNumber(value) {\n      if (typeof value === \"number\") {\n        return value;\n      }\n      if (typeof value === \"string\" && value.trim() !== \"\") {\n        return Number(value);\n      }\n      return NaN;\n    }\n\n    var eventParams;\n    try {\n      eventParams = JSON.parse({{CJS - Event Params JSON}});\n    } catch (error) {\n      console.warn(\"add_to_cart not sent: event parameters are missing or invalid.\");\n      return;\n    }\n\n    if (!eventParams || !Array.isArray(eventParams.items) ||\n        typeof eventParams.currency !== \"string\" || eventParams.currency === \"\") {\n      console.warn(\"add_to_cart not sent: items or currency are missing.\", eventParams);\n      return;\n    }\n\n    console.log(\"Original event parameters:\", eventParams);\n\n    var totalCents = 0;\n    var updatedItems = [];\n\n    for (var i = 0; i < eventParams.items.length; i++) {\n      var item = eventParams.items[i];\n\n      if (!item || typeof item !== \"object\") {\n        console.warn(\"add_to_cart not sent: item \" + i + \" is not an object.\", item);\n        return;\n      }\n\n      var price = toNumber(item.price);\n      var missingQuantity = 1\n      var quantity = item.quantity === undefined ? missingQuantity : toNumber(item.quantity);\n\n      if (!isFinite(price) || price < 0 ||\n          !isFinite(quantity) || quantity <= 0 || Math.floor(quantity) !== quantity) {\n        console.warn(\"add_to_cart not sent: item \" + i + \" has an invalid price or quantity.\", item);\n        return;\n      }\n\n      var priceCents = Math.round(price * 100);\n      var taxCents = Math.round(priceCents * 21 / 100);\n\n      totalCents += (priceCents + taxCents) * quantity;\n\n      updatedItems.push(Object.assign({}, item, {\n        price: priceCents / 100,\n        quantity: quantity,\n        tax: taxCents / 100\n      }));\n    }\n\n    if (updatedItems.length === 0) {\n      console.warn(\"add_to_cart not sent: items list is empty.\");\n      return;\n    }\n\n    console.log(\"Updated items:\", updatedItems);\n\n    var totalValue = totalCents / 100;\n\n    console.log(\"Total value with tax:\", totalValue);\n\n    window.dataLayer = window.dataLayer || [];\n\n    window.dataLayer.push({ ecommerce: null });\n\n    window.dataLayer.push({\n      event: \"add_to_cart\",\n      ecommerce: {\n        value: totalValue,\n        currency: eventParams.currency,\n        items: updatedItems\n      }\n    });\n\n    console.log(\"Transformed add_to_cart event pushed!\");\n  })();\n</script>"
                     },
                     {
                         "type": "BOOLEAN",
@@ -56,7 +58,7 @@
                         "value": "false"
                     }
                 ],
-                "fingerprint": "1792699165146",
+                "fingerprint": "1792724744638",
                 "firingTriggerId": [
                     "5"
                 ],
@@ -778,7 +780,7 @@
                 "name": "Event"
             }
         ],
-        "fingerprint": "1792699319199",
-        "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6383589568/containers/267708902/versions/0?apiLink=version"
+        "fingerprint": "1792725333093",
+        "tagManagerUrl": "https://tagmanager.google.com/#/versions/accounts/6383589568/containers/267708902/versions/3?apiLink=version"
     }
 }

@@ -1,7 +1,58 @@
+const HEADER_ROW = 3;
+const STAFF_HEADERS = ["Name", "Mail", "Alias", "Hash", "Conteo de Seguridad"];
+
 function onEdit(e) {
+  // Running onEdit manually from the editor passes no event object.
+  if (!e || !e.range) {
+    return;
+  }
+
   const sheet = e.range.getSheet();
 
+  if (!isStaffSheet(sheet)) {
+    return;
+  }
+
   sheet.getRange("B1").setValue(new Date());
+}
+
+// The staff sheet is recognized by its headers in row 3, so the script never
+// writes into an unrelated tab, whatever the tab is called.
+function isStaffSheet(sheet) {
+  if (sheet.getMaxRows() < HEADER_ROW || sheet.getMaxColumns() < STAFF_HEADERS.length) {
+    return false;
+  }
+
+  const headers = sheet
+    .getRange(HEADER_ROW, 1, 1, STAFF_HEADERS.length)
+    .getValues()[0];
+
+  return headers.every((header, i) => String(header).trim() === STAFF_HEADERS[i]);
+}
+
+// Prefers the active tab when it is a staff sheet; otherwise uses the only
+// staff sheet in the spreadsheet. Throws if there is none or it is ambiguous.
+function getStaffSheet() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const activeSheet = spreadsheet.getActiveSheet();
+  const staffSheets = spreadsheet.getSheets().filter(isStaffSheet);
+
+  if (staffSheets.some(sheet => sheet.getSheetId() === activeSheet.getSheetId())) {
+    return activeSheet;
+  }
+
+  if (staffSheets.length === 1) {
+    return staffSheets[0];
+  }
+
+  if (staffSheets.length === 0) {
+    throw new Error(
+      `Staff sheet not found. Expected these headers in row ${HEADER_ROW}: ` +
+      `${STAFF_HEADERS.join(", ")}.`
+    );
+  }
+
+  throw new Error("Several staff sheets were found. Open the one to update and try again.");
 }
 
 function onOpen() {
@@ -13,8 +64,17 @@ function onOpen() {
 }
 
 
+// A valid hash contains only letters (any case), ignoring surrounding spaces.
+function isValidHash(hash) {
+  return typeof hash === "string" && /^[a-z]+$/i.test(hash.trim());
+}
+
 function getSecurityCount(hash) {
-  const text = String(hash).toLowerCase();
+  if (!isValidHash(hash)) {
+    throw new Error(`Invalid hash: ${JSON.stringify(hash)}`);
+  }
+
+  const text = hash.trim().toLowerCase();
   const vowels = "aeiou";
 
   let maxLength = 0;
@@ -65,7 +125,14 @@ function testSecurityCount() {
 }
 
 function runSecurityCount() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  let sheet;
+  try {
+    sheet = getStaffSheet();
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(error.message);
+    return;
+  }
+
   const firstDataRow = 4;
   const lastRow = sheet.getLastRow();
 
@@ -78,15 +145,28 @@ function runSecurityCount() {
     .getRange(firstDataRow, 4, lastRow - firstDataRow + 1, 1)
     .getValues();
 
-  const results = hashes.map(([hash]) => [
-    hash === "" ? "" : getSecurityCount(hash)
-  ]);
+  // Blank and invalid hashes get an empty count instead of stopping the run.
+  let invalidCount = 0;
+  const results = hashes.map(([hash]) => {
+    if (String(hash).trim() === "") {
+      return [""];
+    }
+    if (!isValidHash(hash)) {
+      invalidCount++;
+      return [""];
+    }
+    return [getSecurityCount(hash)];
+  });
 
   sheet
     .getRange(firstDataRow, 5, results.length, 1)
     .setValues(results);
 
-  SpreadsheetApp.getUi().alert("Security counts calculated successfully.");
+  SpreadsheetApp.getUi().alert(
+    invalidCount === 0
+      ? "Security counts calculated successfully."
+      : `Security counts calculated. ${invalidCount} row(s) with an invalid hash were left blank.`
+  );
 }
 
 
@@ -94,7 +174,14 @@ const CHARACTERS_API_URL = "https://hp-api.onrender.com/api/characters";
 
 function generateAliases() {
   const ui = SpreadsheetApp.getUi();
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  let sheet;
+  try {
+    sheet = getStaffSheet();
+  } catch (error) {
+    ui.alert(error.message);
+    return;
+  }
+
   const firstDataRow = 4;
   const nameColumn = 1;
   const aliasColumn = 3;
