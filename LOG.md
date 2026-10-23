@@ -34,7 +34,7 @@ Gisela Pardini
 
 ### How you validated
 
-All tests ran on `http://localhost:5500`, with GTM Preview (Tag Assistant) and GA4 DebugView open at the same time.
+All GTM tests ran on `http://localhost:5500`, with GTM Preview (Tag Assistant) and GA4 DebugView open at the same time.
 
 **Add to cart (`#shop`)**
 - Added two products whose prices test the tax rounding:
@@ -53,6 +53,15 @@ All tests ran on `http://localhost:5500`, with GTM Preview (Tag Assistant) and G
 - Submitted a valid email right after an error. Only the success tag fired, and the event carried no `form_error`.
 - In DebugView, `newsletter_submission` arrived with `form_name` and `form_status` on every submission, and with `form_error` only on errors.
 
+**Final checks**
+- GTM container version 3 is published, and `gtm-container.json` is its export.
+- With version 3, `add_to_cart` and `newsletter_submission` were tested again in GTM Preview and GA4 DebugView, and both events arrived as expected.
+- The files in `apps-script/` match the live bound Apps Script project byte for byte.
+- In the Google Sheet, Validaciones → Conteo, run from a different tab, wrote the counts to the employee sheet (E4 = 4, E5 = 3, E6 = 3).
+- Validaciones → Alias, also run from a different tab, assigned 100 unique aliases in the employee sheet.
+- Editing an employee cell updated the date and time in B1.
+- `npm test` passes all 102 automated tests.
+
 ---
 
 ## Part 2 — Apps Script
@@ -68,7 +77,7 @@ Hi,
 Here's an overview of the Apps Script behind the Bixby staff sheet, with the reasoning behind the main decisions, so you can maintain or extend it with confidence.
 
 **Last-change timestamp (`onEdit`)**
-Every edit writes the current date and time into B1 of the sheet that was edited. I used the simple `onEdit` trigger because it needs no installation or extra authorization. It also can't loop: Apps Script doesn't fire `onEdit` for changes made by a script, so the write to B1 doesn't trigger another update. Two things to keep in mind: it applies to whichever tab is edited, and a manual edit to B1 is replaced with the timestamp right away.
+Every edit to the staff sheet writes the current date and time into its B1. I used the simple `onEdit` trigger because it needs no installation or extra authorization. It also can't loop: Apps Script doesn't fire `onEdit` for changes made by a script, so the write to B1 doesn't trigger another update. Two things to keep in mind: edits to other tabs are ignored, because the script only recognizes the staff sheet by its row-3 headers, and a manual edit to B1 is replaced with the timestamp right away.
 
 **Validaciones menu (`onOpen`)**
 The menu is built in `onOpen`, so it appears every time the spreadsheet is opened or reloaded. "Conteo" calls `runSecurityCount` and "Alias" calls `generateAliases`. The menu labels stay in Spanish as specified, and the code is in English.
@@ -95,7 +104,7 @@ My main goal was that a failure never leaves the sheet half-updated or wipes out
 The first time Alias runs, Google asks for permission to connect to an external service. That's expected, because the script calls the API.
 
 **Things worth knowing**
-- Both menu actions work on the tab that's open at the time. If the spreadsheet ever gets more tabs, it would be safer to point the script at the staff sheet by name.
+- The script finds the staff sheet by its row-3 headers (`Name`, `Mail`, `Alias`, `Hash`, `Conteo de Seguridad`), not by the open tab, so the menu actions never write into an unrelated sheet. If those headers are renamed, the actions stop with an error instead of writing.
 - The API is hosted on Render and can take a few seconds to respond on the first request, so the Alias action may feel slow at first.
 
 Happy to walk through any of this or adjust it to your setup.
@@ -107,13 +116,13 @@ Gisela Pardini
 
 **GTM and GA4**
 - **GTM setup:** The container is installed in `website/index.html` because the shop and workshop pages are loaded dynamically through hash navigation. This avoids loading GTM multiple times.
-- **Add-to-cart tracking:** The original dataLayer event remains unchanged. A GTM Custom HTML tag transforms it into a standard GA4 `add_to_cart` event, preserving product details and adding a 21% tax per item. The total value includes tax and quantity. A separate trigger sends the transformed event to GA4, avoiding duplicate tracking.
+- **Add-to-cart tracking:** The original dataLayer event remains unchanged. A GTM Custom HTML tag transforms it into a standard GA4 `add_to_cart` event, preserving product details and adding a 21% tax per item. The total value includes tax and quantity. Tax and value are calculated in integer cents to avoid floating-point rounding errors (for example, $21.50 gives a tax of $4.52, not $4.51). The tag validates the incoming data: if the parameters, items or currency are missing, or any item has an invalid price or quantity, the whole transformed event is rejected with a console warning instead of sending incomplete ecommerce data. A missing quantity defaults to 1, matching GA4. A separate trigger sends the transformed event to GA4, avoiding duplicate tracking.
 - **Newsletter tracking:** Success and error submissions are handled by separate triggers and tags. Both send `newsletter_submission`, including the form name and status, with an error reason only for failed submissions. This prevents stale error information from being sent after a successful submission.
 - **Validation:** Both implementations were tested using GTM Preview and GA4 DebugView, including different product prices and newsletter submission outcomes.
 - **Limitation:** Custom GA4 definitions for newsletter parameters and item-level tax have not been configured, so these values are not yet available in standard reports.
 
 **Apps Script** (source in `apps-script/Código.js`, bound to the sheet above)
-- **Hash count:** `getSecurityCount` makes one pass over the hash. A run continues only while each letter is strictly later than the previous one, so a repeated letter starts a new run. The best length is updated only after the current run contains a vowel, so the result is the length of the longest run that has a vowel, or 0 if none does. It is a pure function, so `testSecurityCount` can run it from the editor without touching the sheet.
+- **Hash count:** `getSecurityCount` makes one pass over the hash. A run continues only while each letter is strictly later than the previous one, so a repeated letter starts a new run. The best length is updated only after the current run contains a vowel, so the result is the length of the longest run that has a vowel, or 0 if none does. It is a pure function, so `testSecurityCount` can run it from the editor without touching the sheet. Empty or invalid hashes (anything other than letters) leave the count cell blank, and the final message reports how many rows had an invalid hash.
 - **Unique aliases:**
   1. Character names are trimmed, and empty names are dropped.
   2. Duplicates are removed ignoring case.
@@ -123,4 +132,12 @@ Gisela Pardini
   The script checks that there are at least as many names as employees before writing anything. Each run replaces the whole column with a new random set.
 - **Failures:** if the request fails, returns a non-200 status, returns invalid JSON or returns something that isn't a list, or if there aren't enough names, the script stops before writing, so the existing aliases stay as they are.
 - **Batch I/O:** each menu action reads a column with one `getValues()` call and writes it with one `setValues()` call, starting at row 4.
-- **Active tab:** both actions run on the active tab (`getActiveSheet()`), so start them from the staff sheet.
+- **Staff sheet:** both actions locate the staff sheet by its row-3 headers. They use the active tab if it is the staff sheet, otherwise the only sheet with those headers, and show an error without writing if none (or more than one) is found. `onEdit` uses the same check, so edits to other tabs don't update B1.
+
+**Automated tests**
+- The repository includes a Node.js test suite in `tests/` with no external dependencies. Run it from the repository root with `npm test` (Node.js 20 or later).
+- The tests run the actual code from `apps-script/Código.js`, `gtm-container.json` and `website/js/newsletter.js` against local mocks of Google Sheets, the Harry Potter API and the dataLayer, plus a minimal simulation of the exported GTM triggers. They cover the security count, alias generation and its failure cases, the add-to-cart tax and value calculations and input validation, the newsletter events, and the GA4 tag configuration.
+- They are local simulations: they check the code and the exported configuration, not the live GTM container, GA4 or the real spreadsheet. GTM Preview, GA4 DebugView and testing in Google Sheets are still required, including after the latest changes to the add-to-cart tag and the Apps Script are synchronized.
+
+**Tooling**
+- I used reusable Claude Code skills and a dedicated review agent to support implementation, QA, and code review. All findings were evaluated against automated tests and manual validation where applicable.
