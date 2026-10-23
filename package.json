@@ -1,0 +1,11 @@
+{
+  "name": "int-solutions-engineer-challenge",
+  "private": true,
+  "description": "Automated tests for the Monks technical challenge (Apps Script and GTM).",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
